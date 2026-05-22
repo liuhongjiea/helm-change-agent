@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变更报告 — Helm Change Agent</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/bash.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/diff.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+</head>
+<body>
+<div class="app-shell" x-data="reportApp()" x-init="init()">
+
+  <header class="topbar">
+    <div class="logo">Helm <span>Change</span> Agent</div>
+    <nav>
+      <a href="/">新建分析</a>
+      <a href="/report.html" class="active" x-show="!loading && !error">
+        <span x-text="meta.component || '报告'"></span>
+        <span x-text="meta.cluster ? ' @ ' + meta.cluster : ''"></span>
+      </a>
+    </nav>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;" x-show="!loading && !error" x-cloak>
+      <span class="risk-badge" :class="riskClass" x-text="riskLabel"></span>
+      <button class="btn btn-secondary" style="padding:6px 14px;font-size:13px;" @click="downloadMd()">
+        ↓ 下载 .md
+      </button>
+      <button class="btn btn-secondary" style="padding:6px 14px;font-size:13px;" @click="copyMd()">
+        <span x-text="copied ? '✓ 已复制' : '复制'"></span>
+      </button>
+    </div>
+  </header>
+
+  <main class="main-content" style="max-width:1080px;">
+
+    <!-- Loading -->
+    <div x-show="loading" class="card" style="text-align:center;padding:40px;">
+      <div class="spinner" style="margin:0 auto 12px;width:28px;height:28px;"></div>
+      <div class="text-muted">加载报告中...</div>
+    </div>
+
+    <!-- Error -->
+    <div x-show="!loading && error" class="card">
+      <div style="color:var(--danger);">⚠️ <span x-text="error"></span></div>
+      <div class="mt-12">
+        <a href="/" class="btn btn-secondary">返回首页</a>
+      </div>
+    </div>
+
+    <!-- Report -->
+    <div x-show="!loading && !error" x-cloak>
+      <!-- Header info -->
+      <div class="card" style="padding:16px 24px;">
+        <div class="flex items-center gap-12" style="flex-wrap:wrap;">
+          <span class="meta-chip">组件: <strong x-text="meta.component"></strong></span>
+          <span class="meta-chip">集群: <strong x-text="meta.cluster"></strong></span>
+          <span class="meta-chip" x-show="meta.namespace">ns: <strong x-text="meta.namespace"></strong></span>
+          <span class="meta-chip text-muted" x-text="meta.generated_at" style="font-size:12px;"></span>
+        </div>
+      </div>
+
+      <div class="report-shell">
+        <!-- Left nav -->
+        <aside class="report-nav">
+          <div style="font-size:12px;color:var(--text-muted);font-weight:600;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px;">目录</div>
+          <template x-for="section in sections" :key="section.id">
+            <a :href="`#${section.id}`" x-text="section.label"></a>
+          </template>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+            <a href="/" style="font-size:12px;">← 新建分析</a>
+          </div>
+        </aside>
+
+        <!-- Report content -->
+        <div class="md-content" id="report-content" x-html="renderedHtml"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>

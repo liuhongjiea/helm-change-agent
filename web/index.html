@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Helm Change Agent</title>
+<link rel="stylesheet" href="/static/styles.css">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div class="app-shell" x-data="app()" x-init="init()">
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <div class="logo">Helm <span>Change</span> Agent</div>
+    <nav>
+      <a href="/" class="active">新建分析</a>
+      <a href="#history" @click.prevent="view = 'history'">历史报告</a>
+    </nav>
+  </header>
+
+  <!-- Main -->
+  <main class="main-content">
+
+    <!-- Loading state -->
+    <div x-show="loading" class="card" style="text-align:center;padding:40px;">
+      <div class="spinner" style="margin:0 auto 12px;width:28px;height:28px;"></div>
+      <div class="text-muted">加载组件索引中...</div>
+    </div>
+
+    <!-- Error state -->
+    <div x-show="!loading && error" class="card">
+      <div style="color:var(--danger);">⚠️ <span x-text="error"></span></div>
+      <button class="btn btn-secondary mt-12" @click="init()">重试</button>
+    </div>
+
+    <!-- Form view -->
+    <div x-show="!loading && !error && view === 'form'" x-cloak>
+
+      <!-- Step 1: Cluster + Component -->
+      <div class="card">
+        <div class="card-title">选择目标</div>
+
+        <div class="form-group">
+          <label>集群</label>
+          <div class="search-wrapper">
+            <span class="search-icon">⌕</span>
+            <select x-model="form.cluster" @change="onClusterChange()" style="padding-left:32px;">
+              <option value="">-- 选择集群 --</option>
+              <template x-for="c in options.clusters" :key="c">
+                <option :value="c" x-text="c"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>组件</label>
+          <select x-model="form.component" @change="onComponentChange()" :disabled="!form.cluster">
+            <option value="">-- 选择组件 --</option>
+            <template x-for="c in filteredComponents" :key="c">
+              <option :value="c" x-text="c"></option>
+            </template>
+          </select>
+        </div>
+
+        <!-- Component meta info -->
+        <div x-show="form.component && componentMeta" x-cloak class="meta-row">
+          <span class="meta-chip">ns: <strong x-text="componentMeta?.namespace"></strong></span>
+          <span class="meta-chip">release: <strong x-text="componentMeta?.release_name"></strong></span>
+          <span class="meta-chip" x-show="componentMeta?.specs?.length > 1">
+            charts: <strong x-text="componentMeta?.specs?.length"></strong>
+          </span>
+          <span class="meta-chip text-sm" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            chart: <strong x-text="componentMeta?.chart_dir_short"></strong>
+          </span>
+        </div>
+      </div>
+
+      <!-- Step 2: Connection method -->
+      <div class="card">
+        <div class="card-title">集群连接方式</div>
+        <div class="radio-group">
+          <div class="radio-option" :class="{ selected: form.source === 'miks-proxy' }"
+               @click="form.source = 'miks-proxy'">
+            <div class="radio-dot"></div>
+            <div>
+              <div class="radio-label">miks-proxy 只读服务号</div>
+              <div class="radio-desc">自动使用 miks-kubectl-view 服务号连接（推荐）</div>
+            </div>
+          </div>
+          <div class="radio-option" :class="{ selected: form.source === 'kubeconfig-upload' }"
+               @click="form.source = 'kubeconfig-upload'">
+            <div class="radio-dot"></div>
+            <div>
+              <div class="radio-label">上传 kubeconfig</div>
+              <div class="radio-desc">手动提供集群凭证文件</div>
+            </div>
+          </div>
+        </div>
+
+        <div x-show="form.source === 'kubeconfig-upload'" x-cloak class="upload-area mt-12">
+          <input type="file" id="kc-upload" @change="onKcFile($event)" accept=".yaml,.yml,.conf">
+          <div x-show="form.kcFileName" class="mt-12 text-sm" style="color:var(--success);">
+            ✓ <span x-text="form.kcFileName"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <button class="btn btn-primary btn-full"
+              :disabled="!canSubmit"
+              @click="startAnalyze()">
+        <span x-show="!analyzing">开始分析</span>
+        <span x-show="analyzing" class="flex items-center gap-8">
+          <span class="spinner" style="border-color:rgba(255,255,255,0.4);border-top-color:#fff;"></span>
+          分析中...
+        </span>
+      </button>
+    </div>
+
+    <!-- Progress view -->
+    <div x-show="view === 'progress'" x-cloak>
+      <div class="card">
+        <div class="card-title">
+          分析进度 — <span x-text="form.component"></span> @ <span x-text="form.cluster"></span>
+        </div>
+        <div class="progress-steps">
+          <template x-for="step in steps" :key="step.id">
+            <div class="step-item" :class="step.status">
+              <div class="step-icon" :class="step.status">
+                <template x-if="step.status === 'running'"><span class="spinner" style="width:12px;height:12px;"></span></template>
+                <template x-if="step.status === 'done'">✓</template>
+                <template x-if="step.status === 'error'">✗</template>
+                <template x-if="step.status === 'pending'"></template>
+              </div>
+              <div class="step-label" x-text="step.label"></div>
+              <div class="step-meta" x-text="step.meta"></div>
+            </div>
+          </template>
+        </div>
+
+        <div x-show="progressError" x-cloak class="mt-12" style="color:var(--danger);font-size:13px;">
+          ⚠️ <span x-text="progressError"></span>
+        </div>
+
+        <div class="flex gap-8 mt-20">
+          <button class="btn btn-secondary" @click="resetForm()">← 返回</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- History view -->
+    <div x-show="view === 'history'" x-cloak>
+      <div class="card">
+        <div class="card-title">历史报告</div>
+        <div x-show="historyLoading" class="text-muted text-sm">加载中...</div>
+        <div x-show="!historyLoading && history.length === 0" class="text-muted text-sm">
+          暂无历史报告
+        </div>
+        <div class="history-list">
+          <template x-for="r in history" :key="r.id">
+            <a class="history-item" :href="`/report.html?id=${r.id}`">
+              <div>
+                <div class="hi-comp" x-text="r.component"></div>
+                <div class="hi-cluster" x-text="r.cluster"></div>
+              </div>
+              <div class="hi-time" x-text="formatTime(r.modified)"></div>
+            </a>
+          </template>
+        </div>
+      </div>
+      <button class="btn btn-secondary" @click="view = 'form'">← 返回</button>
+    </div>
+
+  </main>
+</div>
+
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>
